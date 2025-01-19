@@ -22,6 +22,8 @@ const client = new Client({
 
 const config = require("./config.json"); // Lấy token từ file config.json
 let voiceConnection = null; // Lưu trữ kết nối voice
+let audioQueue = [];
+let isPlaying = false;
 let timeoutId = null; // Lưu trữ timeout để disconnect bot
 
 // Đăng ký lệnh /leave với Discord
@@ -29,21 +31,30 @@ const rest = new REST({ version: "10" }).setToken(config.TOKEN);
 
 (async () => {
   try {
-    console.log("Bắt đầu đăng ký lệnh slash...");
+    console.log("Bắt đầu đăng ký lệnh slash toàn cục...");
 
-    await rest.put(
-      Routes.applicationGuildCommands(config.CLIENT_ID, config.GUILD_ID),
-      {
-        body: [
-          {
-            name: "leave",
-            description: "Bot sẽ rời khỏi voice channel.",
-          },
-        ],
-      }
-    );
+    await rest.put(Routes.applicationCommands(config.CLIENT_ID), {
+      body: [
+        {
+          name: "leave",
+          description: "Bot sẽ rời khỏi voice channel.",
+        },
+        {
+          name: "play",
+          description: "Phát một file mp3 từ link.",
+          options: [
+            {
+              name: "link",
+              type: 3, // STRING
+              description: "Link của file mp3.",
+              required: true,
+            },
+          ],
+        },
+      ],
+    });
 
-    console.log("Lệnh /leave đã đăng ký thành công!");
+    console.log("Lệnh đã đăng ký thành công trên toàn cầu!");
   } catch (error) {
     console.error("Có lỗi khi đăng ký lệnh slash:", error);
   }
@@ -58,67 +69,127 @@ const disconnectBot = () => {
   }
 };
 
-// Đặt timeout để đợi 5 phút sau tin nhắn cuối
+// Đặt timeout để đợi 3 phút sau tin nhắn cuối
 const setDisconnectTimeout = () => {
   if (timeoutId) {
     clearTimeout(timeoutId); // Xóa timeout cũ nếu có
   }
 
   timeoutId = setTimeout(() => {
-    disconnectBot(); // Nếu không có tin nhắn mới, bot sẽ rời khỏi sau 1 phút
-  }, 60000); // 60000 ms = 1 phút
+    disconnectBot(); // Nếu không có tin nhắn mới, bot sẽ rời khỏi sau 3 phút
+  }, 180000); // 60000 ms = 3 phút
 };
 
 // Hàm phát âm thanh cho user
 const playAudioForUser = async (link, guildId, channelId) => {
+  audioQueue.push({ link, guildId, channelId });
+  if (!isPlaying) {
+    playNextAudio();
+  }
+
+  // try {
+  //   // Kết nối vào voice channel
+  //   voiceConnection = joinVoiceChannel({
+  //     channelId: channelId,
+  //     guildId: guildId,
+  //     adapterCreator: client.guilds.cache.get(guildId).voiceAdapterCreator,
+  //   });
+
+  //   // Tạo audio player
+  //   const player = createAudioPlayer({
+  //     behaviors: {
+  //       noSubscriber: NoSubscriberBehavior.Stop,
+  //     },
+  //   });
+
+  //   // Tải dữ liệu âm thanh
+  //   const response = await axios({
+  //     url: link,
+  //     method: "GET",
+  //     responseType: "arraybuffer",
+  //   });
+
+  //   const audioBuffer = Buffer.from(response.data); // Chuyển dữ liệu thành buffer
+  //   const readableStream = Readable.from(audioBuffer); // Tạo stream từ buffer
+
+  //   const resource = createAudioResource(readableStream, {
+  //     inputType: StreamType.Arbitrary,
+  //   });
+
+  //   voiceConnection.subscribe(player); // Kết nối player vào voice channel
+  //   // Đặt timeout 1 giây trước khi phát âm thanh
+  //   setTimeout(() => {
+  //     player.play(resource); // Bắt đầu phát âm thanh sau 1 giây
+  //   }, 1000); // 1000 ms = 1 giây
+
+  //   // Lắng nghe sự kiện khi phát xong
+  //   player.on(AudioPlayerStatus.Idle, () => {
+  //     console.log("Âm thanh đã phát xong.");
+  //     setDisconnectTimeout(); // Đặt timeout để bot rời sau 3 phút
+  //   });
+
+  //   // Xử lý lỗi trong quá trình phát
+  //   player.on("error", (error) => {
+  //     console.error("Lỗi khi phát âm thanh:", error);
+  //     disconnectBot(); // Nếu có lỗi, bot sẽ rời đi
+  //   });
+  // } catch (error) {
+  //   console.error("Lỗi khi xử lý phát âm thanh:", error);
+  // }
+};
+
+const playNextAudio = async () => {
+  if (audioQueue.length === 0) {
+    isPlaying = false;
+    return;
+  }
+
+  isPlaying = true;
+  const { link, guildId, channelId } = audioQueue.shift();
+
   try {
-    // Kết nối vào voice channel
     voiceConnection = joinVoiceChannel({
       channelId: channelId,
       guildId: guildId,
       adapterCreator: client.guilds.cache.get(guildId).voiceAdapterCreator,
     });
 
-    // Tạo audio player
     const player = createAudioPlayer({
       behaviors: {
         noSubscriber: NoSubscriberBehavior.Stop,
       },
     });
 
-    // Tải dữ liệu âm thanh
     const response = await axios({
       url: link,
       method: "GET",
       responseType: "arraybuffer",
     });
 
-    const audioBuffer = Buffer.from(response.data); // Chuyển dữ liệu thành buffer
-    const readableStream = Readable.from(audioBuffer); // Tạo stream từ buffer
+    const audioBuffer = Buffer.from(response.data);
+    const readableStream = Readable.from(audioBuffer);
 
     const resource = createAudioResource(readableStream, {
       inputType: StreamType.Arbitrary,
     });
 
-    voiceConnection.subscribe(player); // Kết nối player vào voice channel
-    // Đặt timeout 1 giây trước khi phát âm thanh
+    voiceConnection.subscribe(player);
     setTimeout(() => {
-      player.play(resource); // Bắt đầu phát âm thanh sau 1 giây
-    }, 1000); // 1000 ms = 1 giây
+      player.play(resource);
+    }, 1000);
 
-    // Lắng nghe sự kiện khi phát xong
     player.on(AudioPlayerStatus.Idle, () => {
       console.log("Âm thanh đã phát xong.");
-      setDisconnectTimeout(); // Đặt timeout để bot rời sau 1 phút
+      playNextAudio(); // Phát file tiếp theo trong hàng đợi
     });
 
-    // Xử lý lỗi trong quá trình phát
     player.on("error", (error) => {
       console.error("Lỗi khi phát âm thanh:", error);
-      disconnectBot(); // Nếu có lỗi, bot sẽ rời đi
+      playNextAudio(); // Bỏ qua file hiện tại và phát file tiếp theo
     });
   } catch (error) {
     console.error("Lỗi khi xử lý phát âm thanh:", error);
+    playNextAudio(); // Bỏ qua file hiện tại và phát file tiếp theo
   }
 };
 
@@ -195,6 +266,28 @@ client.on("interactionCreate", async (interaction) => {
     connection.destroy();
     voiceConnection = null; // Reset kết nối
     return interaction.reply("Bot đã rời khỏi voice channel.");
+  }
+
+  if (interaction.commandName === "play") {
+    const link = interaction.options.getString("link");
+
+    if (!link) {
+      return interaction.reply("Vui lòng nhập link của file mp3.");
+    }
+
+    if (!interaction.member.voice.channel) {
+      return interaction.reply(
+        "Bạn cần phải ở trong một voice channel để sử dụng lệnh này."
+      );
+    }
+
+    await playAudioForUser(
+      link,
+      interaction.guild.id,
+      interaction.member.voice.channelId
+    );
+
+    return interaction.reply("Đang phát âm thanh...");
   }
 });
 
